@@ -1,30 +1,33 @@
-# GraphQL Expense Tracker API
+# Expenses API
 
-This is a Python-based GraphQL server for tracking expenses, built with Flask and Ariadne. It uses an in-memory data store.
+A simple Flask-based GraphQL API for managing expenses, using MongoDB as a database.
+
+## Features
+
+*   Create, read, and update expenses.
+*   Filter expenses by year, month, or day.
+*   Calculates total cost for filtered expenses.
+*   Uses a custom `DateTime` scalar for date handling.
+*   GraphQL endpoint with Playground explorer.
+*   Dockerized for easy setup and deployment.
+*   Automated testing with Pytest and Testcontainers.
+
+## Technologies Used
+
+*   **Backend:** Python, Flask, Ariadne (for GraphQL)
+*   **Database:** MongoDB
+*   **Testing:** Pytest, Testcontainers
+*   **Containerization:** Docker, Docker Compose
+*   **CI/CD:** GitHub Actions
 
 ## Prerequisites
 
--   Python 3.7+
--   Pip
+*   Docker
+*   Docker Compose
 
-## Project Structure
+## Getting Started
 
-```
-expense_tracker_api/
-├── .gitignore
-├── README.md
-├── app.py             # Main Flask & GraphQL application
-├── requirements.txt   # Python dependencies
-└── setup.sh      # Virtual environment setup script
-```
-
-## Setup and Running
-
-1.  **Clone the repository (or create the files in a directory named `expense_tracker_api`):**
-    If you have the files, navigate into the `expense_tracker_api` directory.
-
-2.  **Set up a Python virtual environment:**
-    Make the script executable and run it:
+1.  **Clone the repository:**
     ```bash
     chmod +x setup.sh
     ./setup.sh
