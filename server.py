@@ -48,6 +48,7 @@ type_defs = """
     type Mutation {
         createExpense(description: String!, category: ExpenseCategory!, cost: Float!): Expense
         editExpense(id: ID!, description: String, category: ExpenseCategory, cost: Float): Expense
+        deleteExpense(id: ID!): Boolean
     }
 """
 
@@ -182,6 +183,23 @@ def resolve_edit_expense(_, info, id, description=None, category=None, cost=None
         logger.warning(f"Expense ID: {id} not found for update.")
     return result
 
+@mutation.field("deleteExpense")
+def resolve_delete_expense(_, info, id):
+    logger.info(f"Resolving deleteExpense for ID: {id}")
+    try:
+        object_id = ObjectId(id)
+    except Exception as e:
+        logger.warning(f"Invalid ObjectId format for ID: {id} during delete. Error: {e}")
+        return False # Or raise GraphQLError("Invalid ID format")
+
+    result = expenses_collection.delete_one({"_id": object_id})
+
+    if result.deleted_count > 0:
+        logger.info(f"Expense ID: {id} deleted successfully.")
+        return True
+    else:
+        logger.warning(f"Expense ID: {id} not found for deletion.")
+        return False
 # --- Schema and Flask App Setup ---
 schema = make_executable_schema(type_defs, query, mutation, datetime_scalar)
 app = Flask(__name__)

@@ -322,6 +322,67 @@ def test_datetime_scalar_serialization_deserialization(client):
     assert parse_datetime_value("invalid-date") is None
 
 
+# --- Delete Expense Tests ---
+
+def test_delete_expense(client):
+    # 1. Create an expense
+    import server # Use the direct import
+    initial_expense = {"description": "Item to Delete", "category": "FOOD", "cost": 5.00, "createdAt": datetime.now(timezone.utc)}
+    insert_result = server.expenses_collection.insert_one(initial_expense)
+    expense_id = str(insert_result.inserted_id)
+
+    # 2. Delete the expense
+    mutation = """
+        mutation DeleteExpense($id: ID!) {
+            deleteExpense(id: $id)
+        }
+    """
+    variables = {"id": expense_id}
+    response = graphql_query(client, mutation, variables)
+    json_data = response.get_json()
+
+    assert response.status_code == 200
+    assert "errors" not in json_data
+    assert json_data["data"]["deleteExpense"] is True
+
+    # 3. Verify in DB
+    deleted_doc = server.expenses_collection.find_one({"_id": insert_result.inserted_id})
+    assert deleted_doc is None
+
+
+def test_delete_expense_not_found(client):
+    mutation = """
+        mutation DeleteExpense($id: ID!) {
+            deleteExpense(id: $id)
+        }
+    """
+    # A valid ObjectId format, but non-existent
+    non_existent_id = "60c72b9f9b1e8b3b0f6a1b2d" # Different from edit test
+    variables = {"id": non_existent_id}
+    response = graphql_query(client, mutation, variables)
+    json_data = response.get_json()
+
+    assert response.status_code == 200
+    assert "errors" not in json_data
+    assert json_data["data"]["deleteExpense"] is False
+
+
+def test_delete_expense_invalid_id_format(client):
+    mutation = """
+        mutation DeleteExpense($id: ID!) {
+            deleteExpense(id: $id)
+        }
+    """
+    variables = {"id": "invalid-id-for-delete"}
+    response = graphql_query(client, mutation, variables)
+    json_data = response.get_json()
+
+    assert response.status_code == 200
+    # The resolver returns False for invalid ID format
+    assert "errors" not in json_data # If it were a GraphQLError, this would be different
+    assert json_data["data"]["deleteExpense"] is False
+
+
 # --- Health Check Tests ---
 
 def test_health_check_all_up(client, mocker):
