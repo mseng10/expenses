@@ -1,5 +1,7 @@
 # Expenses API
 
+[![Python CI](https://github.com/mseng10/expenses/actions/workflows/actions.yml/badge.svg)](https://github.com/<YOUR_USERNAME>/<YOUR_REPOSITORY_NAME>/actions/workflows/actions.yml)
+
 A simple Flask-based GraphQL API for managing expenses, using MongoDB as a database.
 
 ## Features
