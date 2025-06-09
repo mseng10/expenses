@@ -1,0 +1,3 @@
+Flask
+ariadne
+Werkzeug # Often good to specify explicitly with Flask/Ariadne
