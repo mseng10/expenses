@@ -11,10 +11,17 @@ expenses_db = []
 type_defs = """
     scalar DateTime
 
+    enum ExpenseCategory {
+        MANDATORY
+        ENTERTAINMENT
+        FOOD
+        HOUSEHOLD
+    }
+
     type Expense {
         id: ID!
         description: String!
-        category: String!
+        category: ExpenseCategory!
         cost: Float!
         createdAt: DateTime!
     }
@@ -29,8 +36,8 @@ type_defs = """
     }
 
     type Mutation {
-        createExpense(description: String!, category: String!, cost: Float!): Expense
-        editExpense(id: ID!, description: String, category: String, cost: Float): Expense
+        createExpense(description: String!, category: ExpenseCategory!, cost: Float!): Expense
+        editExpense(id: ID!, description: String, category: ExpenseCategory, cost: Float): Expense
     }
 """
 
@@ -137,24 +144,24 @@ def graphql_server():
 if __name__ == "__main__":
     # Initialize with some dummy data for testing
     expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Coffee", "category": "Food", "cost": 3.50,
+        "id": str(uuid.uuid4()), "description": "Coffee", "category": "FOOD", "cost": 3.50,
         "createdAt": datetime(2023, 10, 25, 9, 0, 0, tzinfo=timezone.utc)
     })
     expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Lunch", "category": "Food", "cost": 12.00,
+        "id": str(uuid.uuid4()), "description": "Lunch", "category": "FOOD", "cost": 12.00,
         "createdAt": datetime(2023, 10, 26, 12, 30, 0, tzinfo=timezone.utc)
     })
     expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Groceries", "category": "Household", "cost": 55.20,
+        "id": str(uuid.uuid4()), "description": "Groceries", "category": "HOUSEHOLD", "cost": 55.20,
         "createdAt": datetime(2023, 10, 26, 18, 0, 0, tzinfo=timezone.utc)
     })
     expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Movie Ticket", "category": "Entertainment", "cost": 15.00,
+        "id": str(uuid.uuid4()), "description": "Movie Ticket", "category": "ENTERTAINMENT", "cost": 15.00,
         "createdAt": datetime(2023, 11, 1, 20, 0, 0, tzinfo=timezone.utc)
     })
     expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Book", "category": "Education", "cost": 22.99,
-        "createdAt": datetime(datetime.now(timezone.utc).year, 1, 15, 10, 0, 0, tzinfo=timezone.utc) # Expense in current year
+        "id": str(uuid.uuid4()), "description": "Rent", "category": "MANDATORY", "cost": 800.00,
+        "createdAt": datetime(datetime.now(timezone.utc).year, datetime.now(timezone.utc).month, 1, 8, 0, 0, tzinfo=timezone.utc)
     })
 
     app.run(debug=True, host='0.0.0.0', port=5000)
