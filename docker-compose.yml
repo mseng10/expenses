@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app # Mount current directory to /app in container for live code changes
+    depends_on:
+      - mongo
+    environment:
+      # Ensure your Python app connects to the mongo service name
+      # You'll need to update your MongoClient connection string in server.py
+      # to use 'mongodb://mongo:27017/'
+      PYTHONUNBUFFERED: 1 # Ensures print statements appear in Docker logs
+    networks:
+      - expenses-network
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017" # Expose MongoDB port to host (optional, for direct access)
+    volumes:
+      - mongo-data:/data/db # Persist MongoDB data
+    networks:
+      - expenses-network
+
+volumes:
+  mongo-data:
+
+networks:
+  expenses-network:
+    driver: bridge

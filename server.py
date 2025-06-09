@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 # --- MongoDB Setup ---
-client = MongoClient('mongodb://localhost:27017/') # Replace with your MongoDB connection string if different
+client = MongoClient('mongodb://mongo:27017/') # Connect to the 'mongo' service in Docker Compose
 db = client['expenses_app'] # Database name
 expenses_collection = db['expenses'] # Collection name
 
