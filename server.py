@@ -116,7 +116,7 @@ def resolve_create_expense(_, info, description, category, cost):
         "cost": cost,
         "createdAt": datetime.now(timezone.utc)
     }
-    result = expenses_collection.insert_one(new_expense_doc)
+    result = expenses_collection.insert_one(new_expense)
     created_expense = expenses_collection.find_one({"_id": result.inserted_id})
     if created_expense:
         created_expense['id'] = str(created_expense['_id'])
