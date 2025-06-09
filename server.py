@@ -5,6 +5,11 @@ from pymongo import MongoClient
 from bson import ObjectId # For handling MongoDB's _id
 import uuid
 from datetime import datetime, timezone
+import logging
+
+# --- Logging Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- MongoDB Setup ---
 client = MongoClient('mongodb://mongo:27017/') # Connect to the 'mongo' service in Docker Compose
@@ -58,13 +63,16 @@ def parse_datetime_value(value):
     try:
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
+        logger.warning(f"Failed to parse datetime value: {value}.")
         return None # Or raise GraphQLError for bad input
+
 
 # --- Query Resolvers ---
 query = QueryType()
 
 @query.field("getExpenses")
 def resolve_get_expenses(_, info, year=None, month=None, day=None):
+    logger.info(f"Resolving getExpenses with filters: year={year}, month={month}, day={day}")
     mongo_query = {}
     current_time = datetime.now(timezone.utc)
 
@@ -74,22 +82,27 @@ def resolve_get_expenses(_, info, year=None, month=None, day=None):
         end_date_year = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
 
         if month is None and day is None and year == current_time.year:
+            logger.debug(f"Applying 'year so far' filter for current year: {year}")
             # "Year so far" logic for current year
             mongo_query['createdAt'] = {'$gte': start_date_year, '$lte': current_time}
         elif month is not None:
             start_date_month = datetime(year, month, 1, tzinfo=timezone.utc)
             if month == 12:
                 end_date_month = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+                logger.debug(f"Applying month filter for December: {year}-{month}")
             else:
                 end_date_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+                logger.debug(f"Applying month filter for: {year}-{month}")
 
             if day is not None:
+                logger.debug(f"Applying day filter for: {year}-{month}-{day}")
                 start_date_day = datetime(year, month, day, tzinfo=timezone.utc)
                 end_date_day = datetime(year, month, day + 1, tzinfo=timezone.utc) # up to, but not including, the next day
                 mongo_query['createdAt'] = {'$gte': start_date_day, '$lt': end_date_day}
             else:
                 mongo_query['createdAt'] = {'$gte': start_date_month, '$lt': end_date_month}
         else:
+            logger.debug(f"Applying full year filter for: {year}")
             mongo_query['createdAt'] = {'$gte': start_date_year, '$lt': end_date_year}
 
     cursor = expenses_collection.find(mongo_query)
@@ -101,6 +114,7 @@ def resolve_get_expenses(_, info, year=None, month=None, day=None):
         resolved_items.append(doc)
         total_cost += doc.get('cost', 0)
 
+    logger.info(f"Found {len(resolved_items)} expenses with total cost {total_cost}.")
     return {"items": resolved_items, "totalCost": total_cost}
 
 
@@ -109,6 +123,7 @@ mutation = MutationType()
 
 @mutation.field("createExpense")
 def resolve_create_expense(_, info, description, category, cost):
+    logger.info(f"Resolving createExpense: description='{description}', category='{category}', cost={cost}")
     new_expense = {
         # MongoDB will generate _id automatically
         "description": description,
@@ -121,15 +136,20 @@ def resolve_create_expense(_, info, description, category, cost):
     if created_expense:
         created_expense['id'] = str(created_expense['_id'])
         # del created_expense['_id']
+        logger.info(f"Expense created with ID: {created_expense['id']}")
+    else:
+        logger.error(f"Failed to retrieve created expense from DB after insert. Insert ID: {result.inserted_id}")
     return created_expense
 
 @mutation.field("editExpense")
 def resolve_edit_expense(_, info, id, description=None, category=None, cost=None):
+    logger.info(f"Resolving editExpense for ID: {id} with updates: description='{description}', category='{category}', cost={cost}")
     try:
         object_id = ObjectId(id)
-    except Exception:
+    except Exception as e:
         # Handle invalid ID format, perhaps raise GraphQLError
-        return None
+        logger.warning(f"Invalid ObjectId format for ID: {id}. Error: {e}")
+        return None # Or raise GraphQLError("Invalid ID format")
 
     update_fields = {}
     if description is not None:
@@ -140,10 +160,13 @@ def resolve_edit_expense(_, info, id, description=None, category=None, cost=None
         update_fields["cost"] = cost
 
     if not update_fields:
+        logger.info(f"No fields to update for expense ID: {id}. Returning current document.")
         # No fields to update, return the original or an error
         expense_doc = expenses_collection.find_one({"_id": object_id})
         if expense_doc:
             expense_doc['id'] = str(expense_doc['_id'])
+        else:
+            logger.warning(f"Expense not found for ID: {id} when no update fields were provided.")
         return expense_doc
 
     result = expenses_collection.find_one_and_update(
@@ -154,6 +177,9 @@ def resolve_edit_expense(_, info, id, description=None, category=None, cost=None
     if result:
         result['id'] = str(result['_id'])
         # del result['_id']
+        logger.info(f"Expense ID: {id} updated successfully.")
+    else:
+        logger.warning(f"Expense ID: {id} not found for update.")
     return result
 
 # --- Schema and Flask App Setup ---
@@ -166,6 +192,7 @@ def graphql_playground():
 
 @app.route("/graphql", methods=["POST"])
 def graphql_server():
+    logger.debug("GraphQL request received.")
     data = request.get_json()
     success, result = graphql_sync(
         schema,
@@ -174,12 +201,15 @@ def graphql_server():
         debug=app.debug
     )
     status_code = 200 if success else 400
+    if not success:
+        logger.error(f"GraphQL query failed: {result}")
+    logger.debug(f"GraphQL response status: {status_code}")
     return jsonify(result), status_code
 
 if __name__ == "__main__":
     # Optional: Initialize with some dummy data if the collection is empty
     if expenses_collection.count_documents({}) == 0:
-        print("Populating MongoDB with initial data...")
+        logger.info("Populating MongoDB with initial data...")
         initial_expenses = [
             {"description": "Coffee", "category": "FOOD", "cost": 3.50, "createdAt": datetime(2023, 10, 25, 9, 0, 0, tzinfo=timezone.utc)},
             {"description": "Lunch", "category": "FOOD", "cost": 12.00, "createdAt": datetime(2023, 10, 26, 12, 30, 0, tzinfo=timezone.utc)},
@@ -188,6 +218,6 @@ if __name__ == "__main__":
             {"description": "Rent", "category": "MANDATORY", "cost": 800.00, "createdAt": datetime(datetime.now(timezone.utc).year, datetime.now(timezone.utc).month, 1, 8, 0, 0, tzinfo=timezone.utc)}
         ]
         expenses_collection.insert_many(initial_expenses)
-        print(f"{len(initial_expenses)} documents inserted.")
+        logger.info(f"{len(initial_expenses)} documents inserted.")
 
     app.run(debug=True, host='0.0.0.0', port=5000)
