@@ -1,11 +1,16 @@
 from flask import Flask, request, jsonify
 from ariadne import QueryType, MutationType, ScalarType, make_executable_schema, graphql_sync
 from ariadne.explorer import ExplorerPlayground
+from pymongo import MongoClient
+from bson import ObjectId # For handling MongoDB's _id
 import uuid
 from datetime import datetime, timezone
 
-# --- In-memory data store ---
-expenses_db = []
+# --- MongoDB Setup ---
+client = MongoClient('mongodb://localhost:27017/') # Replace with your MongoDB connection string if different
+db = client['expenses_app'] # Database name
+expenses_collection = db['expenses'] # Collection name
+
 
 # --- GraphQL Schema Definition ---
 type_defs = """
@@ -60,28 +65,43 @@ query = QueryType()
 
 @query.field("getExpenses")
 def resolve_get_expenses(_, info, year=None, month=None, day=None):
-    filtered_items = list(expenses_db) # Start with a copy
-
+    mongo_query = {}
     current_time = datetime.now(timezone.utc)
 
+    # Build the date range for the query
     if year is not None:
+        start_date_year = datetime(year, 1, 1, tzinfo=timezone.utc)
+        end_date_year = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+
         if month is None and day is None and year == current_time.year:
             # "Year so far" logic for current year
-            filtered_items = [
-                e for e in filtered_items if e['createdAt'].year == year and e['createdAt'] <= current_time
-            ]
+            mongo_query['createdAt'] = {'$gte': start_date_year, '$lte': current_time}
+        elif month is not None:
+            start_date_month = datetime(year, month, 1, tzinfo=timezone.utc)
+            if month == 12:
+                end_date_month = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                end_date_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+            if day is not None:
+                start_date_day = datetime(year, month, day, tzinfo=timezone.utc)
+                end_date_day = datetime(year, month, day + 1, tzinfo=timezone.utc) # up to, but not including, the next day
+                mongo_query['createdAt'] = {'$gte': start_date_day, '$lt': end_date_day}
+            else:
+                mongo_query['createdAt'] = {'$gte': start_date_month, '$lt': end_date_month}
         else:
-            filtered_items = [e for e in filtered_items if e['createdAt'].year == year]
+            mongo_query['createdAt'] = {'$gte': start_date_year, '$lt': end_date_year}
 
-    if month is not None:
-        filtered_items = [e for e in filtered_items if e['createdAt'].month == month]
+    cursor = expenses_collection.find(mongo_query)
+    resolved_items = []
+    total_cost = 0
+    for doc in cursor:
+        doc['id'] = str(doc['_id']) # Convert ObjectId to string for GraphQL ID
+        # del doc['_id'] # Optionally remove the original _id
+        resolved_items.append(doc)
+        total_cost += doc.get('cost', 0)
 
-    if day is not None:
-        filtered_items = [e for e in filtered_items if e['createdAt'].day == day]
-
-    total_cost = sum(item['cost'] for item in filtered_items)
-
-    return {"items": filtered_items, "totalCost": total_cost}
+    return {"items": resolved_items, "totalCost": total_cost}
 
 
 # --- Mutation Resolvers ---
@@ -90,36 +110,51 @@ mutation = MutationType()
 @mutation.field("createExpense")
 def resolve_create_expense(_, info, description, category, cost):
     new_expense = {
-        "id": str(uuid.uuid4()),
+        # MongoDB will generate _id automatically
         "description": description,
         "category": category,
         "cost": cost,
         "createdAt": datetime.now(timezone.utc)
     }
-    expenses_db.append(new_expense)
-    return new_expense
+    result = expenses_collection.insert_one(new_expense_doc)
+    created_expense = expenses_collection.find_one({"_id": result.inserted_id})
+    if created_expense:
+        created_expense['id'] = str(created_expense['_id'])
+        # del created_expense['_id']
+    return created_expense
 
 @mutation.field("editExpense")
 def resolve_edit_expense(_, info, id, description=None, category=None, cost=None):
-    expense_to_edit = None
-    for expense in expenses_db:
-        if expense["id"] == id:
-            expense_to_edit = expense
-            break
+    try:
+        object_id = ObjectId(id)
+    except Exception:
+        # Handle invalid ID format, perhaps raise GraphQLError
+        return None
 
-    if not expense_to_edit:
-        return None # Or raise an error: raise Exception(f"Expense with id {id} not found")
-
+    update_fields = {}
     if description is not None:
-        expense_to_edit["description"] = description
+        update_fields["description"] = description
     if category is not None:
-        expense_to_edit["category"] = category
+        update_fields["category"] = category
     if cost is not None:
-        expense_to_edit["cost"] = cost
-    # createdAt is not editable
+        update_fields["cost"] = cost
 
-    return expense_to_edit
+    if not update_fields:
+        # No fields to update, return the original or an error
+        expense_doc = expenses_collection.find_one({"_id": object_id})
+        if expense_doc:
+            expense_doc['id'] = str(expense_doc['_id'])
+        return expense_doc
 
+    result = expenses_collection.find_one_and_update(
+        {"_id": object_id},
+        {"$set": update_fields},
+        return_document=True # pymongo.ReturnDocument.AFTER
+    )
+    if result:
+        result['id'] = str(result['_id'])
+        # del result['_id']
+    return result
 
 # --- Schema and Flask App Setup ---
 schema = make_executable_schema(type_defs, query, mutation, datetime_scalar)
@@ -142,26 +177,17 @@ def graphql_server():
     return jsonify(result), status_code
 
 if __name__ == "__main__":
-    # Initialize with some dummy data for testing
-    expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Coffee", "category": "FOOD", "cost": 3.50,
-        "createdAt": datetime(2023, 10, 25, 9, 0, 0, tzinfo=timezone.utc)
-    })
-    expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Lunch", "category": "FOOD", "cost": 12.00,
-        "createdAt": datetime(2023, 10, 26, 12, 30, 0, tzinfo=timezone.utc)
-    })
-    expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Groceries", "category": "HOUSEHOLD", "cost": 55.20,
-        "createdAt": datetime(2023, 10, 26, 18, 0, 0, tzinfo=timezone.utc)
-    })
-    expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Movie Ticket", "category": "ENTERTAINMENT", "cost": 15.00,
-        "createdAt": datetime(2023, 11, 1, 20, 0, 0, tzinfo=timezone.utc)
-    })
-    expenses_db.append({
-        "id": str(uuid.uuid4()), "description": "Rent", "category": "MANDATORY", "cost": 800.00,
-        "createdAt": datetime(datetime.now(timezone.utc).year, datetime.now(timezone.utc).month, 1, 8, 0, 0, tzinfo=timezone.utc)
-    })
+    # Optional: Initialize with some dummy data if the collection is empty
+    if expenses_collection.count_documents({}) == 0:
+        print("Populating MongoDB with initial data...")
+        initial_expenses = [
+            {"description": "Coffee", "category": "FOOD", "cost": 3.50, "createdAt": datetime(2023, 10, 25, 9, 0, 0, tzinfo=timezone.utc)},
+            {"description": "Lunch", "category": "FOOD", "cost": 12.00, "createdAt": datetime(2023, 10, 26, 12, 30, 0, tzinfo=timezone.utc)},
+            {"description": "Groceries", "category": "HOUSEHOLD", "cost": 55.20, "createdAt": datetime(2023, 10, 26, 18, 0, 0, tzinfo=timezone.utc)},
+            {"description": "Movie Ticket", "category": "ENTERTAINMENT", "cost": 15.00, "createdAt": datetime(2023, 11, 1, 20, 0, 0, tzinfo=timezone.utc)},
+            {"description": "Rent", "category": "MANDATORY", "cost": 800.00, "createdAt": datetime(datetime.now(timezone.utc).year, datetime.now(timezone.utc).month, 1, 8, 0, 0, tzinfo=timezone.utc)}
+        ]
+        expenses_collection.insert_many(initial_expenses)
+        print(f"{len(initial_expenses)} documents inserted.")
 
     app.run(debug=True, host='0.0.0.0', port=5000)
