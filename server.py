@@ -2,9 +2,9 @@ from flask import Flask, request, jsonify
 from ariadne import QueryType, MutationType, ScalarType, make_executable_schema, graphql_sync
 from ariadne.explorer import ExplorerPlayground
 from pymongo import MongoClient
-from bson import ObjectId # For handling MongoDB's _id
+from bson import ObjectId  # For handling MongoDB's _id
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 
 # --- Logging Setup ---
@@ -12,9 +12,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # --- MongoDB Setup ---
-client = MongoClient('mongodb://mongo:27017/') # Connect to the 'mongo' service in Docker Compose
-db = client['expenses_app'] # Database name
-expenses_collection = db['expenses'] # Collection name
+client = MongoClient('mongodb://mongo:27017/')  # Connect to the 'mongo' service in Docker Compose
+db = client['expenses_app']  # Database name
+expenses_collection = db['expenses']  # Collection name
 
 
 # --- GraphQL Schema Definition ---
@@ -64,7 +64,7 @@ def parse_datetime_value(value):
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         logger.warning(f"Failed to parse datetime value: {value}.")
-        return None # Or raise GraphQLError for bad input
+        return None  # Or raise GraphQLError for bad input
 
 
 # --- Query Resolvers ---
@@ -96,8 +96,8 @@ def resolve_get_expenses(_, info, year=None, month=None, day=None):
 
             if day is not None:
                 logger.debug(f"Applying day filter for: {year}-{month}-{day}")
-                start_date_day = datetime(year, month, day, tzinfo=timezone.utc)
-                end_date_day = datetime(year, month, day + 1, tzinfo=timezone.utc) # up to, but not including, the next day
+                start_date_day = datetime(year, month, day, tzinfo=timezone.utc) # up to, but not including, the next day
+                end_date_day = start_date_day + timedelta(days=1)
                 mongo_query['createdAt'] = {'$gte': start_date_day, '$lt': end_date_day}
             else:
                 mongo_query['createdAt'] = {'$gte': start_date_month, '$lt': end_date_month}
@@ -109,7 +109,7 @@ def resolve_get_expenses(_, info, year=None, month=None, day=None):
     resolved_items = []
     total_cost = 0
     for doc in cursor:
-        doc['id'] = str(doc['_id']) # Convert ObjectId to string for GraphQL ID
+        doc['id'] = str(doc['_id'])  # Convert ObjectId to string for GraphQL ID
         # del doc['_id'] # Optionally remove the original _id
         resolved_items.append(doc)
         total_cost += doc.get('cost', 0)
@@ -149,7 +149,7 @@ def resolve_edit_expense(_, info, id, description=None, category=None, cost=None
     except Exception as e:
         # Handle invalid ID format, perhaps raise GraphQLError
         logger.warning(f"Invalid ObjectId format for ID: {id}. Error: {e}")
-        return None # Or raise GraphQLError("Invalid ID format")
+        return None  # Or raise GraphQLError("Invalid ID format")
 
     update_fields = {}
     if description is not None:
@@ -172,7 +172,7 @@ def resolve_edit_expense(_, info, id, description=None, category=None, cost=None
     result = expenses_collection.find_one_and_update(
         {"_id": object_id},
         {"$set": update_fields},
-        return_document=True # pymongo.ReturnDocument.AFTER
+        return_document=True  # pymongo.ReturnDocument.AFTER
     )
     if result:
         result['id'] = str(result['_id'])
@@ -197,7 +197,7 @@ def graphql_server():
     success, result = graphql_sync(
         schema,
         data,
-        context_value=request, # Optional: pass context to resolvers
+        context_value=request,  # Optional: pass context to resolvers
         debug=app.debug
     )
     status_code = 200 if success else 400
@@ -206,18 +206,29 @@ def graphql_server():
     logger.debug(f"GraphQL response status: {status_code}")
     return jsonify(result), status_code
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    logger.info("Health check requested.")
+    overall_status = "UP"
+    components = {}
+    http_status_code = 200
+
+    # Check MongoDB health
+    try:
+        # The ping command is cheap and does not require auth.
+        db.command('ping')
+        components['mongodb'] = {"status": "UP", "details": "MongoDB is responsive"}
+        logger.debug("MongoDB ping successful.")
+    except Exception as e:
+        overall_status = "DOWN"
+        http_status_code = 503
+        components['mongodb'] = {"status": "DOWN", "details": f"MongoDB connection failed: {str(e)}"}
+        logger.error(f"MongoDB health check failed: {e}")
+
+    response_body = {"status": overall_status, "components": components}
+    logger.info(f"Health check response: status={overall_status}, http_code={http_status_code}")
+    return jsonify(response_body), http_status_code
+
 if __name__ == "__main__":
-    # Optional: Initialize with some dummy data if the collection is empty
-    if expenses_collection.count_documents({}) == 0:
-        logger.info("Populating MongoDB with initial data...")
-        initial_expenses = [
-            {"description": "Coffee", "category": "FOOD", "cost": 3.50, "createdAt": datetime(2023, 10, 25, 9, 0, 0, tzinfo=timezone.utc)},
-            {"description": "Lunch", "category": "FOOD", "cost": 12.00, "createdAt": datetime(2023, 10, 26, 12, 30, 0, tzinfo=timezone.utc)},
-            {"description": "Groceries", "category": "HOUSEHOLD", "cost": 55.20, "createdAt": datetime(2023, 10, 26, 18, 0, 0, tzinfo=timezone.utc)},
-            {"description": "Movie Ticket", "category": "ENTERTAINMENT", "cost": 15.00, "createdAt": datetime(2023, 11, 1, 20, 0, 0, tzinfo=timezone.utc)},
-            {"description": "Rent", "category": "MANDATORY", "cost": 800.00, "createdAt": datetime(datetime.now(timezone.utc).year, datetime.now(timezone.utc).month, 1, 8, 0, 0, tzinfo=timezone.utc)}
-        ]
-        expenses_collection.insert_many(initial_expenses)
-        logger.info(f"{len(initial_expenses)} documents inserted.")
 
     app.run(debug=True, host='0.0.0.0', port=5000)

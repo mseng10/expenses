@@ -3,6 +3,7 @@ from flask import Flask
 from pymongo import MongoClient
 from testcontainers.mongodb import MongoDbContainer
 from datetime import datetime, timezone, timedelta
+from pymongo.errors import ConnectionFailure
 import json
 
 # Import the app and other necessary components from your server.py
@@ -319,3 +320,41 @@ def test_datetime_scalar_serialization_deserialization(client):
     from server import parse_datetime_value # Use the direct import
     assert parse_datetime_value(dt_iso) == dt_obj
     assert parse_datetime_value("invalid-date") is None
+
+
+# --- Health Check Tests ---
+
+def test_health_check_all_up(client, mocker):
+    # Mock the MongoDB ping command to simulate a healthy connection
+    # The 'db' object is part of the 'server' module, which is modified by the 'app' fixture
+    import server
+    mocker.patch.object(server.db, 'command', return_value={'ok': 1.0})
+
+    response = client.get("/health")
+    json_data = response.get_json()
+
+    assert response.status_code == 200
+    assert json_data["status"] == "UP"
+    assert json_data["components"]["mongodb"]["status"] == "UP"
+    assert json_data["components"]["mongodb"]["details"] == "MongoDB is responsive"
+
+def test_health_check_mongo_down(client, mocker):
+    # Mock the MongoDB ping command to simulate a connection failure
+    import server
+    error_message = "Simulated MongoDB connection error"
+    mocker.patch.object(server.db, 'command', side_effect=ConnectionFailure(error_message))
+
+    response = client.get("/health")
+    json_data = response.get_json()
+
+    assert response.status_code == 503
+    assert json_data["status"] == "DOWN"
+    assert json_data["components"]["mongodb"]["status"] == "DOWN"
+    assert json_data["components"]["mongodb"]["details"] == f"MongoDB connection failed: {error_message}"
+
+    # Test with a generic exception as well
+    generic_error_message = "Generic DB error"
+    mocker.patch.object(server.db, 'command', side_effect=Exception(generic_error_message))
+    response_generic_fail = client.get("/health")
+    assert response_generic_fail.status_code == 503
+    assert "Generic DB error" in response_generic_fail.get_json()["components"]["mongodb"]["details"]
