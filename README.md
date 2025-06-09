@@ -13,6 +13,7 @@ A simple Flask-based GraphQL API for managing expenses, using MongoDB as a datab
 *   GraphQL endpoint with Playground explorer.
 *   Dockerized for easy setup and deployment.
 *   Automated testing with Pytest and Testcontainers.
+*   Health check endpoint (`/health`) to monitor application and database status.
 *   Basic logging implemented for monitoring and debugging.
 
 ## Technologies Used
